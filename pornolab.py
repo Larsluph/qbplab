@@ -13,7 +13,7 @@ credentials = {
 # Logging
 import logging
 logger = logging.getLogger()
-#logger.setLevel(logging.DEBUG)
+# logger.setLevel(logging.DEBUG)
 logger.setLevel(logging.WARNING)
 
 # Try blocks are used to circumvent Python2/3 modules discrepancies and use a single script for both versions.
@@ -279,13 +279,14 @@ class pornolab(object):
             logging.info("Parsing page {}.".format(int(start)//50+1))
             self.parser.search(what, start)
 
-        # PrettyPrint each torrent found
+        # PrettyPrint each torrent found, ordered by most seeds
+        self.parser.results.sort(key=lambda torrent:torrent['seeds'], reverse=True)
         for torrent in self.parser.results:
+            torrent['engine_url'] = 'https://pornolab.net' # Kludge, see #15
             if __name__ != "__main__": # This is just to avoid printing when I debug.
                 prettyPrinter(torrent)
             else:
                 print(torrent)
-
 
         self.parser.close()
         logging.info("{} torrents found.".format(len(self.parser.results)))
@@ -293,4 +294,4 @@ class pornolab(object):
 # For testing purposes.
 if __name__ == "__main__":
     engine = pornolab()
-    #engine.search('')
+    # engine.search('2020')
