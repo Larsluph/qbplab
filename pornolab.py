@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-#VERSION: 1.0
+#VERSION: 1.1
 #AUTHORS: TainakaDrums [tainakadrums@yandex.ru]
 """Pornolab search engine plugin for qBittorrent."""
 
@@ -13,7 +13,7 @@ credentials = {
 # Logging
 import logging
 logger = logging.getLogger()
-# logger.setLevel(logging.DEBUG)
+#logger.setLevel(logging.DEBUG)
 logger.setLevel(logging.WARNING)
 
 # Try blocks are used to circumvent Python2/3 modules discrepancies and use a single script for both versions.
@@ -75,7 +75,7 @@ class pornolab(object):
         self.cj = cookielib.CookieJar()
         self.opener = build_opener(HTTPCookieProcessor(self.cj))
         self.url = 'https://pornolab.net'  # Override url with the actual URL to be used (in case official URL isn't accessible)
-        self.credentials = credentials
+        self.credentials = credentials.copy()
         # Add submit button additional POST param.
         self.credentials['login'] = u'Вход'
         try:
@@ -88,8 +88,7 @@ class pornolab(object):
             if not 'bb_data' in [cookie.name for cookie in self.cj]:
                 logging.debug(self.cj)
                 raise ValueError("Unable to connect using given credentials.")
-            else:
-                logging.info("Login successful.")
+            logging.info("Login successful.")
         except (URLError, HTTPError, ValueError) as e:
             logging.error(e)
 
@@ -130,6 +129,7 @@ class pornolab(object):
             self.other_pages = []
             self.cat_re = re.compile(r'tracker\.php\?f=\d+')
             self.pages_re = re.compile(r'tracker\.php\?.*?start=(\d+)')
+            self.is_similar_query = False
             self.reset_current()
 
         def reset_current(self):
@@ -140,10 +140,14 @@ class pornolab(object):
                                  'size': None,
                                  'seeds': None,
                                  'leech': None,
-                                 'desc_link': None,}
+                                 'desc_link': None,
+                                 'engine_url': 'https://pornolab.net'} # Kludge, see #15
 
         def handle_data(self, data):
             """Retrieve inner text information based on rules defined in do_tag()."""
+            if self.is_similar_query:  # Skip processing tags if similar query banner has been encountered
+                return
+
             for key in self.current_item:
                 if self.current_item[key] == True:
                     if key == 'size':
@@ -153,6 +157,9 @@ class pornolab(object):
 
         def handle_starttag(self, tag, attrs):
             """Pass along tag and attributes to dedicated handlers. Discard any tag without handler."""
+            if self.is_similar_query:  # Skip processing tags if similar query banner has been encountered
+                return
+
             try:
                 getattr(self, 'do_{}'.format(tag))(attrs)
             except:
@@ -160,6 +167,9 @@ class pornolab(object):
 
         def handle_endtag(self, tag):
             """Add last item manually on html end tag."""
+            if self.is_similar_query:  # Skip processing tags if similar query banner has been encountered
+                return
+
             # We add last item found manually because items are added on new
             # <tr class="tCenter"> and not on </tr> (can't do it without the attribute).
             if tag == 'html' and self.current_item['seeds']:
@@ -210,6 +220,17 @@ class pornolab(object):
             if 'seedmed' in params.get('class', ''):
                 self.current_item['seeds'] = True
 
+        def do_div(self, attr):
+            """<div class="info_msg_wrap"> tells us that the query returned no exact results but similar"""
+            params = dict(attr)
+            try:
+                if 'info_msg_wrap' in params['class']:
+                    # skip query
+                    logging.info("Similar query banner found. Stop parsing")
+                    self.is_similar_query = True
+            except KeyError:
+                pass
+
         def search(self, what, start=0):
             """Search for what starting on specified page. Defaults to first page of results."""
             logging.debug("parse_search({}, {})".format(what, start))
@@ -246,18 +267,20 @@ class pornolab(object):
         # Search on first page.
         logging.info("Parsing page 1.")
         self.parser.search(what)
+        
+        if self.parser.is_similar_query:
+            logging.info('Similar query banner found. Not iterating through pages.')
+            self.parser.other_pages.clear()
+        else:
+            # If multiple pages of results have been found, repeat search for each page.
+            logging.info("{} pages of results found.".format(len(self.parser.other_pages)+1))
 
-        # If multiple pages of results have been found, repeat search for each page.
-        logging.info("{} pages of results found.".format(len(self.parser.other_pages)+1))
         for start in self.parser.other_pages:
             logging.info("Parsing page {}.".format(int(start)//50+1))
             self.parser.search(what, start)
 
-        # PrettyPrint each torrent found, ordered by most seeds
-        self.parser.results.sort(key=lambda torrent:torrent['seeds'], reverse=True)
+        # PrettyPrint each torrent found
         for torrent in self.parser.results:
-
-            torrent['engine_url'] = 'https://pornolab.net' # Kludge, see #15
             if __name__ != "__main__": # This is just to avoid printing when I debug.
                 prettyPrinter(torrent)
             else:
@@ -270,4 +293,4 @@ class pornolab(object):
 # For testing purposes.
 if __name__ == "__main__":
     engine = pornolab()
-    # engine.search('2020')
+    #engine.search('')
